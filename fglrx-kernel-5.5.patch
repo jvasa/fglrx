@@ -1,0 +1,799 @@
+diff --git a/common/lib/modules/fglrx/build_mod/2.6.x/Makefile b/common/lib/modules/fglrx/build_mod/2.6.x/Makefile
+index a672746..7655477 100755
+--- a/common/lib/modules/fglrx/build_mod/2.6.x/Makefile
++++ b/common/lib/modules/fglrx/build_mod/2.6.x/Makefile
+@@ -27,7 +27,6 @@
+ LIBIP_PREFIX	?= ..
+ 
+ obj-m           += fglrx.o
+-fglrx-libs      += libfglrx_ip.a
+ 
+ fglrx-c-objs    += firegl_public.o      \
+                    kcl_acpi.o           \
+@@ -41,7 +40,7 @@ fglrx-c-objs    += firegl_public.o      \
+                    kcl.o                \
+                    kcl_wait.o
+ 
+-fglrx-objs      += $(fglrx-c-objs) $(fglrx-libs)
++fglrx-objs      += $(fglrx-c-objs)
+ 
+ fglrx-hdrs      += firegl_public.h      \
+                    fglrxko_pci_ids.h    \
+@@ -69,6 +68,8 @@ EXTRA_CFLAGS    += \
+                 -DFGL_LINUX253P1_VMA_API \
+                 -DPAGE_ATTR_FIX=$(PAGE_ATTR_FIX) \
+ 
++EXTRA_LDFLAGS      := /usr/lib/fglrx/libfglrx_ip.a
++
+ ifeq ($(KERNELRELEASE),)
+ # on first call from remote location we get into this path
+ # whilst on second call all is managed by the embedding kernel makefile
+@@ -85,7 +86,7 @@ fglrx-cfiles    = ${fglrx-c-objs:.o=.c}
+ # default:: kmod_build
+ 
+ kmod_build:: $(fglrx-libs) $(fglrx-cfiles) $(fglrx-hdrs) $(drm-hdrs)
+-	$(MAKE) -C $(KDIR) SUBDIRS=$(PWD) modules
++	$(MAKE) -C $(KDIR) M=$(PWD) modules
+ 
+ %.c:
+ 	@ln -s ../$@
+diff --git a/common/lib/modules/fglrx/build_mod/2.6.x/Makefile.rej b/common/lib/modules/fglrx/build_mod/2.6.x/Makefile.rej
+new file mode 100644
+index 0000000..130668b
+--- /dev/null
++++ b/common/lib/modules/fglrx/build_mod/2.6.x/Makefile.rej
+@@ -0,0 +1,28 @@
++--- common/lib/modules/fglrx/build_mod/2.6.x/Makefile	2019-01-22 17:25:01.973982320 -0700
+++++ common/lib/modules/fglrx/build_mod/2.6.x/Makefile	2019-01-22 17:27:43.051156601 -0700
++@@ -27,7 +27,6 @@
++ LIBIP_PREFIX	?= ..
++ 
++ obj-m           += fglrx.o
++-fglrx-libs      += libfglrx_ip.a
++ 
++ fglrx-c-objs    += firegl_public.o      \
++                    kcl_acpi.o           \
++@@ -41,7 +40,7 @@
++                    kcl.o                \
++                    kcl_wait.o
++ 
++-fglrx-objs      += $(fglrx-c-objs) $(fglrx-libs)
+++fglrx-objs      += $(fglrx-c-objs)
++ 
++ fglrx-hdrs      += firegl_public.h      \
++                    fglrxko_pci_ids.h    \
++@@ -69,6 +68,8 @@
++                 -DFGL_LINUX253P1_VMA_API \
++                 -DPAGE_ATTR_FIX=$(PAGE_ATTR_FIX) \
++ 
+++EXTRA_LDFLAGS      := /usr/lib/fglrx/libfglrx_ip.a_shipped
+++
++ ifeq ($(KERNELRELEASE),)
++ # on first call from remote location we get into this path
++ # whilst on second call all is managed by the embedding kernel makefile
+diff --git a/common/lib/modules/fglrx/build_mod/drmP.h b/common/lib/modules/fglrx/build_mod/drmP.h
+index 81546b2..a690ad8 100755
+--- a/common/lib/modules/fglrx/build_mod/drmP.h
++++ b/common/lib/modules/fglrx/build_mod/drmP.h
+@@ -218,12 +218,10 @@
+ #define DRM_PROC_LIMIT (PAGE_SIZE-80)
+ 
+ #define DRM_PROC_PRINT(fmt, arg...)					\
+-   len += sprintf(&buf[len], fmt , ##arg);				\
+-   if (len > DRM_PROC_LIMIT) { *eof = 1; return len - offset; }
++   if ((len += sprintf(&buf[len], fmt , ##arg)) > DRM_PROC_LIMIT) { *eof = 1; return len - offset; }
+ 
+ #define DRM_PROC_PRINT_RET(ret, fmt, arg...)				\
+-   len += sprintf(&buf[len], fmt , ##arg);				\
+-   if (len > DRM_PROC_LIMIT) { ret; *eof = 1; return len - offset; }
++   if ((len += sprintf(&buf[len], fmt , ##arg)) > DRM_PROC_LIMIT) { ret; *eof = 1; return len - offset; }
+ 
+ /*@}*/
+ 
+diff --git a/common/lib/modules/fglrx/build_mod/firegl_public.c b/common/lib/modules/fglrx/build_mod/firegl_public.c
+index 9c70211..f5f1984 100755
+--- a/common/lib/modules/fglrx/build_mod/firegl_public.c
++++ b/common/lib/modules/fglrx/build_mod/firegl_public.c
+@@ -203,6 +203,18 @@
+ #include <asm/fpu/internal.h>
+ #endif
+ #endif
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,11,0)
++#include <linux/mm.h>
++#include <linux/sched/signal.h>
++#endif
++
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,12,0)
++#include <asm/set_memory.h>
++#endif
++
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(5,1,0)
++#include <uapi/linux/mman.h>// MAP_SHARED
++#endif
+ 
+ #include "firegl_public.h"
+ #include "kcl_osconfig.h"
+@@ -285,7 +297,7 @@ module_param(firegl, charp, 0);
+ #endif
+ 
+ #ifdef MODULE_LICENSE
+-MODULE_LICENSE("Proprietary. (C) 2002 - ATI Technologies, Starnberg, GERMANY");
++MODULE_LICENSE("GPL");
+ #endif
+ #ifdef MODULE_DEVICE_TABLE
+ MODULE_DEVICE_TABLE(pci, fglrx_pci_table);
+@@ -630,8 +642,13 @@ static int firegl_major_proc_read(struct seq_file *m, void* data)
+     *eof = 1;
+ 
+     len = snprintf(buf, request, "%d\n", major);
++#else
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,3,0)
++    seq_printf(m, "%d\n", major);
++    len = 0;
+ #else
+     len = seq_printf(m, "%d\n", major);
++#endif
+ #endif
+ 
+     KCL_DEBUG1(FN_FIREGL_PROC, "return len=%i\n",len);
+@@ -1622,6 +1639,7 @@ int ATI_API_CALL KCL_SetPageCache_Array(unsigned long *pt, int pages, int enable
+             pPageList[lowPageCount++] = (unsigned long )KCL_ConvertPageToKernelAddress((void*)pt[i]);
+         }
+     }
++#if LINUX_VERSION_CODE < KERNEL_VERSION(5,4,0)
+     if (enable)
+     {
+         ret = set_memory_array_wb(pPageList, lowPageCount);
+@@ -1630,6 +1648,7 @@ int ATI_API_CALL KCL_SetPageCache_Array(unsigned long *pt, int pages, int enable
+     {                
+         ret = set_memory_array_uc(pPageList, lowPageCount);
+     }
++#endif
+     if (pPageList != NULL)
+     {
+         kfree(pPageList);
+@@ -2728,12 +2747,12 @@ void ATI_API_CALL KCL_UnlockMemPage(void* pt)
+ 
+ int ATI_API_CALL KCL_MEM_VerifyReadAccess(void* addr, kcl_size_t size)
+ {
+-    return access_ok(VERIFY_READ, addr, size) ? 0 : -EFAULT;
++    return access_ok(addr, size) ? 0 : -EFAULT;
+ }
+ 
+ int ATI_API_CALL KCL_MEM_VerifyWriteAccess(void* addr, kcl_size_t size)
+ {
+-    return access_ok(VERIFY_WRITE, addr, size) ? 0 : -EFAULT;
++    return access_ok(addr, size) ? 0 : -EFAULT;
+ }
+ 
+ /** \brief Get Init kernel PTE by address. Couldn't be used for kernel >= 2.6.25.
+@@ -2743,6 +2762,9 @@ int ATI_API_CALL KCL_MEM_VerifyWriteAccess(void* addr, kcl_size_t size)
+ unsigned long ATI_API_CALL KCL_GetInitKerPte(unsigned long address)
+ {
+     pgd_t *pgd_p;
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,12,0)
++    p4d_t *p4d_p;
++#endif
+ #if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,11)
+     pud_t *pud_p;
+ #endif
+@@ -2757,7 +2779,13 @@ unsigned long ATI_API_CALL KCL_GetInitKerPte(unsigned long address)
+ #endif
+     PGD_PRESENT(pgd_p);
+ #if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,11)
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,12,0)
++    P4D_OFFSET(p4d_p, pgd_p, address);
++    P4D_PRESENT(p4d_p);
++    PUD_OFFSET(pud_p, p4d_p, address);
++#else
+     PUD_OFFSET(pud_p, pgd_p, address);
++#endif
+     PUD_PRESENT(pud_p);
+     PMD_OFFSET(pmd_p, pud_p, address);
+ #else
+@@ -2814,6 +2842,9 @@ unsigned long ATI_API_CALL KCL_GetPageTableByVirtAddr(
+         unsigned long * page_addr)
+ {
+     pgd_t* pgd_p;
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,12,0)
++    p4d_t *p4d_p;
++#endif
+ #if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,11)
+     pud_t* pud_p;
+ #endif
+@@ -2826,7 +2857,13 @@ unsigned long ATI_API_CALL KCL_GetPageTableByVirtAddr(
+     KCL_DEBUG2(FN_FIREGL_KCL,"pgd_p=0x%08lx\n", (unsigned long)pgd_p);
+ 
+ #if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,11)
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,12,0)
++    P4D_OFFSET(p4d_p, pgd_p, virtual_addr);
++    P4D_PRESENT(p4d_p);
++    PUD_OFFSET(pud_p, p4d_p, virtual_addr);
++#else
+     PUD_OFFSET(pud_p, pgd_p, virtual_addr);
++#endif
+     PUD_PRESENT(pud_p);
+     KCL_DEBUG2(FN_FIREGL_KCL,"pud_p=0x%08lx\n", (unsigned long)pud_p);
+     PMD_OFFSET(pmd_p, pud_p, virtual_addr);
+@@ -2883,6 +2920,9 @@ unsigned int ATI_API_CALL KCL_GetPageSizeByVirtAddr(
+         unsigned int  * page_size)
+ {
+     pgd_t* pgd_p;
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,12,0)
++    p4d_t *p4d_p;
++#endif
+ #if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,11)
+     pud_t* pud_p;
+ #endif
+@@ -2895,7 +2935,13 @@ unsigned int ATI_API_CALL KCL_GetPageSizeByVirtAddr(
+     KCL_DEBUG2(FN_FIREGL_KCL,"pgd_p=0x%08lx\n", (unsigned long)pgd_p);
+ 
+ #if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,11)
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,12,0)
++    P4D_OFFSET(p4d_p, pgd_p, virtual_addr);
++    P4D_PRESENT(p4d_p);
++    PUD_OFFSET(pud_p, p4d_p, virtual_addr);
++#else
+     PUD_OFFSET(pud_p, pgd_p, virtual_addr);
++#endif
+     PUD_PRESENT(pud_p);
+     KCL_DEBUG2(FN_FIREGL_KCL,"pud_p=0x%08lx\n", (unsigned long)pud_p);
+     PMD_OFFSET(pmd_p, pud_p, virtual_addr);
+@@ -2949,7 +2995,11 @@ unsigned int ATI_API_CALL KCL_GetPageSizeByVirtAddr(
+ static void kcl_flush_tlb_one(void *va)
+ {
+     unsigned long *addr = (unsigned long *)va;
++#   if (LINUX_VERSION_CODE < KERNEL_VERSION(4,14,21))
+     __flush_tlb_one(*addr);
++#   else
++    __flush_tlb_one_kernel(*addr);
++#   endif
+ }
+ 
+ /** /brief Flush one page on all cpus
+@@ -3074,6 +3124,9 @@ int ATI_API_CALL KCL_TestAndClearPageDirtyFlag(unsigned long virtual_addr, unsig
+ {
+     int ret = -1; // init with page not present
+     pgd_t* pgd_p;
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,12,0)
++    p4d_t *p4d_p;
++#endif
+ #if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,11)
+     pud_t* pud_p;
+ #endif
+@@ -3126,7 +3179,16 @@ int ATI_API_CALL KCL_TestAndClearPageDirtyFlag(unsigned long virtual_addr, unsig
+          KCL_DEBUG1(FN_FIREGL_KCL,"pgd_p=0x%08lx\n", (unsigned long)pgd_p);
+ 
+ #if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,11)
+-         PUD_OFFSET(pud_p, pgd_p, page_addr);
++        #if LINUX_VERSION_CODE >= KERNEL_VERSION(4,12,0)
++        P4D_OFFSET(p4d_p, pgd_p, page_addr);
++        if (!p4d_present(*p4d_p)) {
++            KCL_DEBUG1(FN_FIREGL_KCL,"ERROR: !p4d_present\n");
++            continue;
++        }
++        PUD_OFFSET(pud_p, p4d_p, page_addr);
++        #else
++        PUD_OFFSET(pud_p, pgd_p, page_addr);
++        #endif
+          if (!pud_present(*pud_p))
+          {
+              KCL_DEBUG1(FN_FIREGL_KCL,"ERROR: !pud_present\n");
+@@ -3220,7 +3282,15 @@ int ATI_API_CALL KCL_LockUserPages(unsigned long vaddr, unsigned long* page_list
+     int ret;
+ 
+     down_read(&current->mm->mmap_sem);
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,10,0)
++    ret = get_user_pages_remote(current, current->mm, vaddr, page_cnt, 1, (struct page **)page_list, NULL, NULL);
++#elif LINUX_VERSION_CODE >= KERNEL_VERSION(4,9,0)
++    ret = get_user_pages_remote(current, current->mm, vaddr, page_cnt, 1, (struct page **)page_list, NULL);
++#elif LINUX_VERSION_CODE >= KERNEL_VERSION(4,6,0)
++    ret = get_user_pages_remote(current, current->mm, vaddr, page_cnt, 1, 0, (struct page **)page_list, NULL);
++#else
+     ret = get_user_pages(current, current->mm, vaddr, page_cnt, 1, 0, (struct page **)page_list, NULL);
++#endif
+     up_read(&current->mm->mmap_sem);
+ 
+     return ret;
+@@ -3238,7 +3308,15 @@ int ATI_API_CALL KCL_LockReadOnlyUserPages(unsigned long vaddr, unsigned long* p
+     int ret;
+ 
+     down_read(&current->mm->mmap_sem);
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,10,0)
++    ret = get_user_pages_remote(current, current->mm, vaddr, page_cnt, 0, (struct page **)page_list, NULL, NULL);
++#elif LINUX_VERSION_CODE >= KERNEL_VERSION(4,9,0)
++    ret = get_user_pages_remote(current, current->mm, vaddr, page_cnt, 0, (struct page **)page_list, NULL);
++#elif LINUX_VERSION_CODE >= KERNEL_VERSION(4,6,0)
++    ret = get_user_pages_remote(current, current->mm, vaddr, page_cnt, 0, 0, (struct page **)page_list, NULL);
++#else
+     ret = get_user_pages(current, current->mm, vaddr, page_cnt, 0, 0, (struct page **)page_list, NULL);
++#endif
+     up_read(&current->mm->mmap_sem);
+ 
+     return ret;
+@@ -3249,7 +3327,11 @@ void ATI_API_CALL KCL_UnlockUserPages(unsigned long* page_list, unsigned int pag
+     unsigned int i;
+     for (i=0; i<page_cnt; i++)
+     {
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,6,0)
++        put_page((struct page*)page_list[i]);
++#else
+         page_cache_release((struct page*)page_list[i]);
++#endif
+     }
+ }
+ 
+@@ -3354,7 +3436,9 @@ static void deferred_flush(void* contextp)
+  * \param nonatomic Currently unused.
+  * \param wait If true, wait (atomically) until function has completed on other CPUs.
+  */
+-#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,27)
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 3, 0)
++#define KCL_SmpCallFunction(func, info, nonatomic, wait) ({ int __ret = 0; smp_call_function(func, info, wait); __ret; })
++#elif LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,27)
+ #define KCL_SmpCallFunction(func, info, nonatomic, wait) smp_call_function(func, info, wait)
+ #else
+ #define KCL_SmpCallFunction(func, info, nonatomic, wait) smp_call_function(func, info, nonatomic, wait)
+@@ -3424,7 +3508,11 @@ int ATI_API_CALL KCL_MEM_MTRR_Support(void)
+ int ATI_API_CALL KCL_MEM_MTRR_AddRegionWc(unsigned long base, unsigned long size)
+ {
+ #ifdef CONFIG_MTRR
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,3,0)
++    return arch_phys_wc_add(base, size);
++#else
+     return mtrr_add(base, size, MTRR_TYPE_WRCOMB, 1);
++#endif
+ #else /* !CONFIG_MTRR */
+     return -EPERM;
+ #endif /* !CONFIG_MTRR */
+@@ -3433,7 +3521,12 @@ int ATI_API_CALL KCL_MEM_MTRR_AddRegionWc(unsigned long base, unsigned long size
+ int ATI_API_CALL KCL_MEM_MTRR_DeleteRegion(int reg, unsigned long base, unsigned long size)
+ {
+ #ifdef CONFIG_MTRR
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,3,0)
++    arch_phys_wc_del(reg);
++    return reg;
++#else
+     return mtrr_del(reg, base, size);
++#endif
+ #else /* !CONFIG_MTRR */
+     return -EPERM;
+ #endif /* !CONFIG_MTRR */
+@@ -3596,7 +3689,9 @@ static __inline__ int do_vm_shm_fault(struct vm_area_struct *vma, struct vm_faul
+     unsigned long vma_offset;
+     unsigned long pte_linear;
+     mem_map_t* pMmPage;
+-#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,26)
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,10,0)
++    unsigned long address = (unsigned long) (vmf->address);
++#elif LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,26)
+     unsigned long address = (unsigned long) (vmf->virtual_address);
+ #endif
+ 
+@@ -3671,7 +3766,9 @@ static __inline__ int do_vm_dma_fault(struct vm_area_struct *vma, struct vm_faul
+ {
+     unsigned long kaddr;
+     mem_map_t* pMmPage;
+-#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,26)
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,10,0)
++    unsigned long address = (unsigned long) (vmf->address);
++#elif LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,26)
+     unsigned long address = (unsigned long) (vmf->virtual_address);
+ #endif
+ 
+@@ -3716,7 +3813,9 @@ static __inline__ int do_vm_kmap_fault(struct vm_area_struct *vma, struct vm_fau
+ {
+     unsigned long kaddr;
+     mem_map_t* pMmPage;
+-#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,26)
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,10,0)
++    unsigned long address = (unsigned long) (vmf->address);
++#elif LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,26)
+     unsigned long address = (unsigned long) (vmf->virtual_address);
+ #endif
+ 
+@@ -3779,7 +3878,9 @@ static __inline__ int do_vm_pcie_fault(struct vm_area_struct *vma, struct vm_fau
+     mem_map_t* pMmPage;
+     struct firegl_pcie_mem* pciemem;
+     unsigned long* pagelist;
+-#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,26)
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,10,0)
++    unsigned long address = (unsigned long) (vmf->address);
++#elif LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,26)
+     unsigned long address = (unsigned long) (vmf->virtual_address);
+ #endif
+     
+@@ -3841,7 +3942,9 @@ static __inline__ int do_vm_gart_fault(struct vm_area_struct *vma, struct vm_fau
+ 
+     unsigned long offset;
+     struct page *page;
+-#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,26)
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,10,0)
++    unsigned long address = (unsigned long) (vmf->address);
++#elif LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,26)
+     unsigned long address = (unsigned long) (vmf->virtual_address);
+ #endif
+ 
+@@ -4029,6 +4132,9 @@ char* ATI_API_CALL KCL_MEM_VM_GetRegionPhysAddrStr(struct vm_area_struct* vma,
+                             kcl_dma_addr_t* phys_address)
+ {
+     pgd_t* pgd_p;
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,12,0)
++    p4d_t *p4d_p;
++#endif
+     pmd_t* pmd_p;
+     pte_t  pte;
+ #if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,11)
+@@ -4042,7 +4148,17 @@ char* ATI_API_CALL KCL_MEM_VM_GetRegionPhysAddrStr(struct vm_area_struct* vma,
+         return buf;
+     }
+ #if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,11)
++    #if LINUX_VERSION_CODE >= KERNEL_VERSION(4,12,0)
++    p4d_p = p4d_offset(pgd_p, virtual_addr);
++    if (!p4d_present(*p4d_p))
++    {
++        *buf = 0;
++        return buf;
++    }
++    pud_p = pud_offset(p4d_p, virtual_addr);
++    #else
+     pud_p = pud_offset(pgd_p, virtual_addr);
++    #endif
+     if (!pud_present(*pud_p))
+     {
+         *buf = 0;
+@@ -4136,12 +4252,50 @@ static vm_nopage_ret_t ip_vm_gart_nopage(struct vm_area_struct* vma,
+ 
+ #else
+ 
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,10,0)
++#define TRACE_FAULT(_f, _v,_a)                                          \
++   int  ret;                                                            \
++   KCL_DEBUG_TRACEIN(FN_DRM_NOPAGE, (unsigned long)_a->address, NULL); \
++   ret = _f(_v,_a);                                                     \
++   KCL_DEBUG_TRACEOUT(FN_DRM_NOPAGE, ret, NULL);                                \
++   return ret;
++#else
+ #define TRACE_FAULT(_f, _v,_a)                                          \
+    int  ret;                                                            \
+    KCL_DEBUG_TRACEIN(FN_DRM_NOPAGE, (unsigned long)_a->virtual_address, NULL); \
+    ret = _f(_v,_a);                                                     \
+    KCL_DEBUG_TRACEOUT(FN_DRM_NOPAGE, ret, NULL);                                \
+    return ret;
++#endif
++
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,11,0)
++
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(5,1,0)
++typedef unsigned int ip_vm_ret;
++#else
++typedef int ip_vm_ret;
++#endif
++
++static ip_vm_ret ip_vm_fault(struct vm_fault *vmf) {
++    TRACE_FAULT(do_vm_fault, vmf->vma, vmf);
++}
++static ip_vm_ret ip_vm_shm_fault(struct vm_fault *vmf) {
++    TRACE_FAULT(do_vm_shm_fault, vmf->vma, vmf);
++}
++static ip_vm_ret ip_vm_dma_fault(struct vm_fault *vmf) {
++    TRACE_FAULT(do_vm_dma_fault, vmf->vma, vmf);
++}
++static ip_vm_ret ip_vm_kmap_fault(struct vm_fault *vmf) {
++    TRACE_FAULT(do_vm_kmap_fault, vmf->vma, vmf);
++}
++static ip_vm_ret ip_vm_pcie_fault(struct vm_fault *vmf) {
++    TRACE_FAULT(do_vm_pcie_fault, vmf->vma, vmf);
++}
++static ip_vm_ret ip_vm_gart_fault(struct vm_fault *vmf) {
++    TRACE_FAULT(do_vm_gart_fault, vmf->vma, vmf);
++}
++
++#else /* LINUX_VERSION_CODE >= KERNEL_VERSION(4,11,0) */
+ 
+ static int ip_vm_fault(struct vm_area_struct *vma, struct vm_fault *vmf)
+ {
+@@ -4173,6 +4327,8 @@ static int ip_vm_gart_fault(struct vm_area_struct *vma, struct vm_fault *vmf)
+     TRACE_FAULT(do_vm_gart_fault, vma, vmf);
+ }
+ 
++#endif /* LINUX_VERSION_CODE >= KERNEL_VERSION(4,11,0) */
++
+ #endif /* LINUX_VERSION_CODE < KERNEL_VERSION(2,6,26) */
+ 
+ static struct vm_operations_struct vm_ops =
+@@ -4518,7 +4674,11 @@ static void kcl_mem_pat_setup (void *info)
+     write_cr0(cr0);
+     wbinvd();
+ 
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,7,0)
++    if (boot_cpu_has(X86_FEATURE_PGE))
++#else
+     if (cpu_has_pge)
++#endif
+     {
+         cr4 = READ_CR4();
+         WRITE_CR4(cr4 & ~X86_CR4_PGE);
+@@ -4532,7 +4692,11 @@ static void kcl_mem_pat_setup (void *info)
+     wbinvd();
+     __flush_tlb();
+     write_cr0(cr0 & 0xbfffffff);
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,7,0)
++    if (boot_cpu_has(X86_FEATURE_PGE))
++#else
+     if (cpu_has_pge)
++#endif
+     {
+         WRITE_CR4(cr4);
+     }
+@@ -4559,7 +4723,11 @@ static void kcl_mem_pat_restore (void *info)
+     write_cr0(cr0);
+     wbinvd();
+ 
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,7,0)
++    if (boot_cpu_has(X86_FEATURE_PGE))
++#else
+     if (cpu_has_pge)
++#endif
+     {
+         cr4 = READ_CR4();
+         WRITE_CR4(cr4 & ~X86_CR4_PGE);
+@@ -4572,7 +4740,11 @@ static void kcl_mem_pat_restore (void *info)
+     wbinvd();
+     __flush_tlb();
+     write_cr0(cr0 & 0xbfffffff);
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,7,0)
++    if (boot_cpu_has(X86_FEATURE_PGE))
++#else
+     if (cpu_has_pge)
++#endif
+     {
+         WRITE_CR4(cr4);
+     }
+@@ -6444,18 +6616,22 @@ void ATI_API_CALL KCL_create_uuid(void *buf)
+     generate_random_uuid((char *)buf);
+ }
+ 
++#ifndef CONFIG_X86_64
+ #if LINUX_VERSION_CODE >= KERNEL_VERSION(3,15,0)
+ static int KCL_fpu_save_init(struct task_struct *tsk)
+ {
+    struct fpu *fpu = &tsk->thread.fpu;
+ 
+    if(static_cpu_has(X86_FEATURE_XSAVE)) {
+-#if LINUX_VERSION_CODE < KERNEL_VERSION(4,2,0)
+-      fpu_xsave(fpu);
+-      if (!(fpu->state->xsave.xsave_hdr.xstate_bv & XSTATE_FP))
+-#else
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,4,0)
++	  copy_xregs_to_kernel(&fpu->state.xsave);
++      if (!(fpu->state.xsave.header.xfeatures & XFEATURE_MASK_FP))
++#elif LINUX_VERSION_CODE >= KERNEL_VERSION(4,2,0)
+ 	  copy_xregs_to_kernel(&fpu->state.xsave);
+       if (!(fpu->state.xsave.header.xfeatures & XSTATE_FP))
++#else
++      fpu_xsave(fpu);
++      if (!(fpu->state->xsave.xsave_hdr.xstate_bv & XSTATE_FP))
+ #endif
+          return 1;
+    } else if (static_cpu_has(X86_FEATURE_FXSR)) {
+@@ -6483,6 +6659,8 @@ static int KCL_fpu_save_init(struct task_struct *tsk)
+    return 1;
+ }
+ #endif
++#endif
++
+ 
+ /** \brief Prepare for using FPU
+  *  \param none
+@@ -6491,12 +6669,7 @@ static int KCL_fpu_save_init(struct task_struct *tsk)
+ void ATI_API_CALL KCL_fpu_begin(void)
+ {
+ #ifdef CONFIG_X86_64
+-#if LINUX_VERSION_CODE < KERNEL_VERSION(4,2,0)
+     kernel_fpu_begin();
+-#else
+-    preempt_disable();
+-    __kernel_fpu_begin();
+-#endif
+ #else
+ #ifdef TS_USEDFPU
+     struct thread_info *cur_thread = current_thread_info();
+@@ -6546,12 +6719,7 @@ void ATI_API_CALL KCL_fpu_begin(void)
+  */
+ void ATI_API_CALL KCL_fpu_end(void)
+ {
+-#if LINUX_VERSION_CODE < KERNEL_VERSION(4,2,0)
+     kernel_fpu_end();
+-#else
+-    __kernel_fpu_end();
+-    preempt_enable();
+-#endif
+ }
+ 
+ /** Create new directory entry under "/proc/...."
+diff --git a/common/lib/modules/fglrx/build_mod/firegl_public.h b/common/lib/modules/fglrx/build_mod/firegl_public.h
+index cb6ef1e..353fab5 100755
+--- a/common/lib/modules/fglrx/build_mod/firegl_public.h
++++ b/common/lib/modules/fglrx/build_mod/firegl_public.h
+@@ -91,6 +91,23 @@ do { \
+     } \
+ } while(0)
+ 
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,12,0)
++#define P4D_OFFSET(p4d_p, pgd_p, pte_linear)  \
++do { \
++    p4d_p = p4d_offset(pgd_p, pte_linear); \
++} while(0)
++
++#define P4D_PRESENT(p4d_p) \
++do { \
++    if (!p4d_present(*(p4d_p))) \
++    { \
++        return PAGING_FAULT_SIGBUS_INT;   /* Something bad happened; generate SIGBUS */ \
++        /* alternatively we could generate a NOPAGE_OOM "out of memory" */ \
++    } \
++} while(0)
++
++#endif // LINUX_VERSION_CODE >= KERNEL_VERSION(4,12,0)
++
+ #if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,11)
+ #define PUD_PRESENT(pud_p) \
+ do { \
+@@ -650,9 +667,15 @@ extern unsigned long        KCL_SYSINFO_TimerTicksPerSecond;
+ #define cpu_has_pat  test_bit(X86_FEATURE_PAT, (void *) &boot_cpu_data.x86_capability)
+ #endif
+ 
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,7,0)
++#ifndef boot_cpu_has
++#define boot_cpu_has(X86_FEATURE_PGE) test_bit(X86_FEATURE_PGE, &boot_cpu_data.x86_capability)
++#endif
++#else
+ #ifndef cpu_has_pge
+ #define cpu_has_pge test_bit(X86_FEATURE_PGE, &boot_cpu_data.x86_capability)
+ #endif
++#endif
+ 
+ /* 2.6.29 defines pgprot_writecombine as a macro which resolves to a
+  * GPL-only function with the same name. So we always use our own
+diff --git a/common/lib/modules/fglrx/build_mod/kcl.c b/common/lib/modules/fglrx/build_mod/kcl.c
+index 626dec2..35eec12 100755
+--- a/common/lib/modules/fglrx/build_mod/kcl.c
++++ b/common/lib/modules/fglrx/build_mod/kcl.c
+@@ -30,6 +30,11 @@
+ #include <linux/slab.h>
+ #include <linux/pci.h>
+ 
++#include <linux/version.h>
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,11,0)
++#include <linux/sched/signal.h>
++#endif
++
+ #define SUSPEND_CONSOLE  (MAX_NR_CONSOLES-1)
+ 
+ /** \brief Send signal to a specified pid
+@@ -128,4 +133,4 @@ int ATI_API_CALL KCL_Release_Firmware(KCL_FIRMWARE *pFirmware)
+     pFirmware->fw = NULL;
+     
+     return 0;
+-}
+\ No newline at end of file
++}
+diff --git a/common/lib/modules/fglrx/build_mod/kcl_acpi.c b/common/lib/modules/fglrx/build_mod/kcl_acpi.c
+index 33eba18..5eb0c02 100755
+--- a/common/lib/modules/fglrx/build_mod/kcl_acpi.c
++++ b/common/lib/modules/fglrx/build_mod/kcl_acpi.c
+@@ -359,7 +359,10 @@ void* KCL_ACPI_GetVfctBios(unsigned long *size)
+ {
+     struct acpi_table_header *hdr;
+     acpi_size tbl_size ;
+-#if LINUX_VERSION_CODE >= KERNEL_VERSION(3,6,3)    
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,10,0)
++    tbl_size = hdr->length;
++    if (!ACPI_SUCCESS(acpi_get_table("VFCT", 1, &hdr)))
++#elif LINUX_VERSION_CODE >= KERNEL_VERSION(3,6,3)    
+     if (!ACPI_SUCCESS(acpi_get_table_with_size("VFCT", 1, &hdr, &tbl_size)))
+ #else
+     tbl_size = 0x7fffffff;
+@@ -461,7 +464,7 @@ unsigned int ATI_API_CALL KCL_ACPI_RemoveHandler(KCL_ACPI_DevHandle device,
+ 
+ unsigned int ATI_API_CALL KCL_ACPI_InstallLidHandler(void)
+ {
+-#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,32)
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,32) && LINUX_VERSION_CODE < KERNEL_VERSION(5,5,0)
+     if (acpi_lid_notifier_register(&firegl_acpi_lid_notifier))
+     {
+         KCL_DEBUG_ERROR("lid notifier registration failed\n");
+@@ -473,7 +476,7 @@ unsigned int ATI_API_CALL KCL_ACPI_InstallLidHandler(void)
+ 
+ unsigned int ATI_API_CALL KCL_ACPI_RemoveLidHandler(void)
+ {
+-#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,32)
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,32) && LINUX_VERSION_CODE < KERNEL_VERSION(5,5,0)
+     if (firegl_acpi_lid_notifier.notifier_call)
+     {
+         acpi_lid_notifier_unregister(&firegl_acpi_lid_notifier);
+@@ -1029,7 +1032,10 @@ int ATI_API_CALL KCL_ACPI_ParseTable(char *id, KCL_ACPI_IntCallbackHandle handle
+         return KCL_ACPI_ERROR; 
+     }
+ 
+-#if LINUX_VERSION_CODE >= KERNEL_VERSION(3,6,3)    
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,10,0)
++    tbl_size = hdr->length;
++    if (!ACPI_SUCCESS(acpi_get_table(id, 0, &hdr)))
++#elif LINUX_VERSION_CODE >= KERNEL_VERSION(3,6,3)
+     if (!ACPI_SUCCESS(acpi_get_table_with_size(id, 0, &hdr, &tbl_size)))
+ #else
+     tbl_size = 0x7fffffff;
+diff --git a/common/lib/modules/fglrx/build_mod/kcl_ioctl.c b/common/lib/modules/fglrx/build_mod/kcl_ioctl.c
+index e62b9c8..5ad5882 100755
+--- a/common/lib/modules/fglrx/build_mod/kcl_ioctl.c
++++ b/common/lib/modules/fglrx/build_mod/kcl_ioctl.c
+@@ -30,7 +30,10 @@
+  *
+  */
+ 
++#include <linux/cache.h>
++#include <linux/sched.h> // for task_struct in asm/current.h
+ #include <linux/version.h>
++#include <asm/processor.h> // for mm_segment_t in asm/uaccess.h
+ #include <asm/uaccess.h>
+ 
+ #ifdef __x86_64__
+@@ -222,10 +225,14 @@ void ATI_API_CALL KCL_IOCTL_UnregisterConversion32(unsigned int cmd)
+  */
+ void* ATI_API_CALL KCL_IOCTL_AllocUserSpace32(long size)
+ {
++#if LINUX_VERSION_CODE < KERNEL_VERSION(5,4,0)
+     void __user *ret = COMPAT_ALLOC_USER_SPACE(size);
++#else
++    void __user *ret = arch_compat_alloc_user_space(size);
++#endif
+ 
+     /* prevent stack overflow */
+-    if (!access_ok(VERIFY_WRITE, ret, size))
++    if (!access_ok(ret, size))
+         return NULL;
+ 
+     return (void *)ret;
+diff --git a/common/lib/modules/fglrx/build_mod/kcl_pci.c b/common/lib/modules/fglrx/build_mod/kcl_pci.c
+index c757e4a..6ace768 100755
+--- a/common/lib/modules/fglrx/build_mod/kcl_pci.c
++++ b/common/lib/modules/fglrx/build_mod/kcl_pci.c
+@@ -59,7 +59,9 @@ int ATI_API_CALL KCL_PCI_CheckBDF(
+ {
+     struct pci_dev* pci_dev;
+ 
+-#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,23)
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,17,0)
++	pci_dev = pci_get_domain_bus_and_slot(0, busnum, PCI_DEVFN(devnum, funcnum));
++#elif LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,23)
+     pci_dev = pci_get_bus_and_slot(busnum, PCI_DEVFN(devnum, funcnum));
+ #else
+     pci_dev = pci_find_slot(busnum, PCI_DEVFN(devnum, funcnum));
+@@ -96,7 +98,9 @@ int ATI_API_CALL KCL_PCI_CheckBDF(
+ KCL_PCI_DevHandle ATI_API_CALL KCL_PCI_GetDevHandle(
+     KCL_TYPE_U32 bus, KCL_TYPE_U32 slot)
+ {
+-#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,23)
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,17,0)
++    return (KCL_PCI_DevHandle)pci_get_domain_bus_and_slot(0, bus, slot);
++#elif LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,23)
+     return (KCL_PCI_DevHandle)pci_get_bus_and_slot(bus, slot);
+ #else
+     return (KCL_PCI_DevHandle)pci_find_slot(bus, slot);
+diff --git a/common/lib/modules/fglrx/build_mod/kcl_wait.c b/common/lib/modules/fglrx/build_mod/kcl_wait.c
+index c212bd0..40baac0 100755
+--- a/common/lib/modules/fglrx/build_mod/kcl_wait.c
++++ b/common/lib/modules/fglrx/build_mod/kcl_wait.c
+@@ -43,6 +43,10 @@
+ #include "kcl_config.h"
+ #include "kcl_wait.h"
+ 
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,13,0)
++typedef wait_queue_entry_t wait_queue_t;
++#endif
++
+ /** \brief Create wait object, init it and add to the kernel queue
+  ** \param object_handle [in] Object handle
+  ** \return Kernel wait handle on success, 0 otherwise
